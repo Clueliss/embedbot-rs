@@ -6,7 +6,7 @@ use std::fmt::{Debug, Formatter};
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Settings {
     pub discord_token: String,
-    pub embed_behaviours: EmbedBehaviours,
+    pub embed_behaviour: EmbedBehaviours,
     pub modules: Option<Modules>,
 }
 
@@ -14,7 +14,7 @@ impl Debug for Settings {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Settings")
             .field("discord_token", &"[REDACTED]")
-            .field("embed_behaviours", &self.embed_behaviours)
+            .field("embed_behaviour", &self.embed_behaviour)
             .field("modules", &self.modules)
             .finish()
     }

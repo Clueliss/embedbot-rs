@@ -45,7 +45,7 @@ async fn main() {
     };
 
     let embed_bot = {
-        let mut e = EmbedBot::from_settings(settings.embed_behaviours);
+        let mut e = EmbedBot::from_settings(settings.embed_behaviour);
 
         if let Some(modules) = settings.modules {
             #[cfg(feature = "reddit")]

@@ -28,7 +28,7 @@ use url::Url;
 
 pub struct EmbedBot {
     apis: Vec<Box<dyn PostScraper + Send + Sync>>,
-    embed_behaviours: EmbedBehaviours,
+    embed_behaviour: EmbedBehaviours,
 }
 
 #[derive(Debug, Error)]
@@ -42,7 +42,7 @@ pub enum Error {
 
 impl EmbedBot {
     pub fn from_settings(settings: EmbedBehaviours) -> Self {
-        EmbedBot { apis: Vec::new(), embed_behaviours: settings }
+        EmbedBot { apis: Vec::new(), embed_behaviour: settings }
     }
 
     pub fn register_api<T: 'static + PostScraper + Send + Sync>(&mut self, api: T) {
@@ -206,12 +206,12 @@ impl EventHandler for EmbedBot {
                     let comment = interaction_try!(&command, &ctx, parse_option(options, "comment", |x| x.as_str()));
 
                     let embed_nsfw = select_embed_behaviour(
-                        &self.embed_behaviours.nsfw,
+                        &self.embed_behaviour.nsfw,
                         interaction_try!(&command, &ctx, parse_option(options, "embed-nsfw", |x| x.as_bool())),
                     );
 
                     let embed_spoiler = select_embed_behaviour(
-                        &self.embed_behaviours.spoiler,
+                        &self.embed_behaviour.spoiler,
                         interaction_try!(&command, &ctx, parse_option(options, "embed-spoiler", |x| x.as_bool())),
                     );
 
