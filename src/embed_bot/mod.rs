@@ -10,12 +10,14 @@ use crate::{
 };
 use itertools::Itertools;
 use serenity::{
-    all::{CommandDataOption, CommandDataOptionValue},
     async_trait,
     builder::{CreateCommand, CreateCommandOption, CreateInteractionResponse},
     client::{Context, EventHandler},
     model::{
-        application::{Command, CommandData, CommandOptionType, CommandType, Interaction},
+        application::{
+            Command, CommandData, CommandDataOption, CommandDataOptionValue, CommandOptionType, CommandType,
+            Interaction,
+        },
         channel::Message,
         gateway::Ready,
     },

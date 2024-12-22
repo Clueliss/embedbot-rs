@@ -6,8 +6,8 @@ use crate::{
     scraper::{Comment, Post, PostCommonData, PostSpecializedData},
 };
 use serenity::{
-    all::User,
     builder::{CreateEmbed, CreateEmbedAuthor, CreateEmbedFooter},
+    model::user::User,
 };
 use url::Url;
 
