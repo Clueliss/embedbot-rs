@@ -43,12 +43,12 @@ impl EmbedBot {
         EmbedBot { apis: Vec::new(), embed_behaviours: settings }
     }
 
-    pub fn find_api(&self, url: &Url) -> Option<&(dyn PostScraper + Send + Sync)> {
-        self.apis.iter().find(|a| a.is_suitable(url)).map(AsRef::as_ref)
-    }
-
     pub fn register_api<T: 'static + PostScraper + Send + Sync>(&mut self, api: T) {
         self.apis.push(Box::new(api));
+    }
+
+    fn find_api(&self, url: &Url) -> Option<&(dyn PostScraper + Send + Sync)> {
+        self.apis.iter().find(|a| a.is_suitable(url)).map(AsRef::as_ref)
     }
 
     async fn scrape_post(&self, mut url: Url) -> Result<Post, Error> {
@@ -62,18 +62,34 @@ impl EmbedBot {
     }
 }
 
+macro_rules! server_communication_try {
+    ($res:expr, $msg:expr) => {
+        match $res {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::error!("{msg}: {err:#}", msg = $msg);
+                return;
+            },
+        }
+    };
+}
+
 macro_rules! interaction_try {
     ($command:expr, $ctx:expr, $res:expr) => {
         match $res {
             Ok(opt) => opt,
             Err(err) => {
-                return $command
-                    .create_response(
-                        $ctx,
-                        CreateInteractionResponse::Message(embed::error(format!("Invalid input: {err}"))),
-                    )
-                    .await
-                    .unwrap();
+                server_communication_try!(
+                    $command
+                        .create_response(
+                            $ctx,
+                            CreateInteractionResponse::Message(embed::error(format!("Invalid input: {err}"))),
+                        )
+                        .await,
+                    "Unable to send error response"
+                );
+
+                return;
             },
         }
     };
@@ -106,19 +122,21 @@ impl EventHandler for EmbedBot {
             if let Some(url) = url {
                 match self.scrape_post(url.clone()).await {
                     Ok(post) => {
-                        msg.channel_id
-                            .send_message(
-                                &ctx,
-                                embed::embed(
-                                    &post,
-                                    &msg.author,
-                                    &EmbedOptions { comment: comment.as_deref(), ..Default::default() },
-                                ),
-                            )
-                            .await
-                            .unwrap();
+                        server_communication_try!(
+                            msg.channel_id
+                                .send_message(
+                                    &ctx,
+                                    embed::embed(
+                                        &post,
+                                        &msg.author,
+                                        &EmbedOptions { comment: comment.as_deref(), ..Default::default() },
+                                    ),
+                                )
+                                .await,
+                            "Unable to send message"
+                        );
 
-                        msg.delete(&ctx).await.unwrap();
+                        server_communication_try!(msg.delete(&ctx).await, "Unable to delete user message");
                     },
                     Err(Error::NoScraperAvailable) => {
                         tracing::info!("not embedding {}: no scraper available", url);
@@ -132,37 +150,39 @@ impl EventHandler for EmbedBot {
     }
 
     async fn ready(&self, ctx: Context, _ready: Ready) {
-        let _ = Command::create_global_command(
-            &ctx,
-            CreateCommand::new("embed")
-                .kind(CommandType::ChatInput)
-                .description("embed a post")
-                .add_option(
-                    CreateCommandOption::new(CommandOptionType::String, "url", "url of the post").required(true),
-                )
-                .add_option(
-                    CreateCommandOption::new(
-                        CommandOptionType::Boolean,
-                        "embed-nsfw",
-                        "embed fully even if post is flagged as nsfw",
+        server_communication_try!(
+            Command::create_global_command(
+                &ctx,
+                CreateCommand::new("embed")
+                    .kind(CommandType::ChatInput)
+                    .description("embed a post")
+                    .add_option(
+                        CreateCommandOption::new(CommandOptionType::String, "url", "url of the post").required(true),
                     )
-                    .required(false),
-                )
-                .add_option(
-                    CreateCommandOption::new(
-                        CommandOptionType::Boolean,
-                        "embed-spoiler",
-                        "embed fully even if post is flagged as spoiler",
-                    )
-                    .required(false),
-                )
-                .add_option(
-                    CreateCommandOption::new(CommandOptionType::String, "comment", "a personal comment to include")
+                    .add_option(
+                        CreateCommandOption::new(
+                            CommandOptionType::Boolean,
+                            "embed-nsfw",
+                            "embed post fully even if it is flagged as nsfw",
+                        )
                         .required(false),
-                ),
-        )
-        .await
-        .unwrap();
+                    )
+                    .add_option(
+                        CreateCommandOption::new(
+                            CommandOptionType::Boolean,
+                            "embed-spoiler",
+                            "embed post fully even if it is flagged as spoiler",
+                        )
+                        .required(false),
+                    )
+                    .add_option(
+                        CreateCommandOption::new(CommandOptionType::String, "comment", "a personal comment to include")
+                            .required(false),
+                    ),
+            )
+            .await,
+            "Unable to set up commands"
+        );
 
         tracing::info!("logged in");
     }
@@ -201,13 +221,15 @@ impl EventHandler for EmbedBot {
 
                             match self.scrape_post(url.clone()).await {
                                 Ok(post) => {
-                                    command
-                                        .create_response(
-                                            &ctx,
-                                            CreateInteractionResponse::Message(embed::embed(&post, user, &opts)),
-                                        )
-                                        .await
-                                        .unwrap();
+                                    server_communication_try!(
+                                        command
+                                            .create_response(
+                                                &ctx,
+                                                CreateInteractionResponse::Message(embed::embed(&post, user, &opts)),
+                                            )
+                                            .await,
+                                        "Unable to send response"
+                                    );
 
                                     tracing::trace!("embedded '{}': {:?}", url, post);
                                 },
@@ -215,23 +237,30 @@ impl EventHandler for EmbedBot {
                                     let msg = format!("{}", e);
                                     tracing::error!("error: {msg}");
 
-                                    command
-                                        .create_response(&ctx, CreateInteractionResponse::Message(embed::error(msg)))
-                                        .await
-                                        .unwrap();
+                                    server_communication_try!(
+                                        command
+                                            .create_response(
+                                                &ctx,
+                                                CreateInteractionResponse::Message(embed::error(msg))
+                                            )
+                                            .await,
+                                        "Unable to send error response"
+                                    );
                                 },
                             }
                         },
                         Err(_) => {
-                            command
-                                .create_response(
-                                    &ctx,
-                                    CreateInteractionResponse::Message({
-                                        embed::error(format!("Could not parse url: {url}"))
-                                    }),
-                                )
-                                .await
-                                .unwrap();
+                            server_communication_try!(
+                                command
+                                    .create_response(
+                                        &ctx,
+                                        CreateInteractionResponse::Message({
+                                            embed::error(format!("Could not parse url: {url}"))
+                                        }),
+                                    )
+                                    .await,
+                                "Unable to send error response"
+                            );
                         },
                     }
                 },
@@ -241,7 +270,7 @@ impl EventHandler for EmbedBot {
     }
 }
 
-fn parse_option<'val, F, T, I>(options: I, name: &str, try_map_value: F) -> anyhow::Result<Option<T>>
+fn parse_option<'val, I, F, T>(options: I, name: &str, try_map_value: F) -> anyhow::Result<Option<T>>
 where
     I: IntoIterator<Item = &'val CommandDataOption>,
     F: FnOnce(&'val CommandDataOptionValue) -> Option<T>,

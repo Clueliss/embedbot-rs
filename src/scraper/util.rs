@@ -1,3 +1,4 @@
+use anyhow::Context;
 use reqwest::IntoUrl;
 use url::Url;
 
@@ -10,11 +11,17 @@ pub async fn wget<U: IntoUrl>(url: U) -> anyhow::Result<reqwest::Response> {
         .header("User-Agent", USER_AGENT)
         .send()
         .await
-        .map_err(Into::into)
+        .context("Unable to fetch web page")?
+        .error_for_status()
+        .context("Server responded with error code")
 }
 
 pub async fn wget_json<U: IntoUrl>(url: U) -> anyhow::Result<serde_json::Value> {
-    wget(url).await?.json().await.map_err(Into::into)
+    wget(url)
+        .await?
+        .json()
+        .await
+        .context("Unable to parse response as json")
 }
 
 pub fn url_path_ends_with(haystack: &Url, needle: &str) -> bool {
