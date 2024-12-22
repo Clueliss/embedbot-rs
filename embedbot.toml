@@ -1,0 +1,10 @@
+discord_token = "YOUR_DISCORD_TOKEN"
+
+[embed-behaviour]
+nsfw = { default = false, allow-override = false }
+spoiler = { default = false, allow-override = true }
+
+[modules]
+reddit = {}
+ninegag = {}
+twitter = {}

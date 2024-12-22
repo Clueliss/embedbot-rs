@@ -35,7 +35,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get upgrade -y && apt-get install ca-certificates chromium -y
 
-COPY ./embedbot.json /etc/embedbot.json
+COPY embedbot.toml /etc/embedbot.json
 COPY --from=builder /usr/local/src/embedbot-rs/target/release/embedbot-rs /usr/local/bin/
 
 RUN chmod +x /usr/local/bin/embedbot-rs
