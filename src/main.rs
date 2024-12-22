@@ -1,10 +1,14 @@
 mod embed_bot;
-mod post_grab_api;
+mod scraper;
 
+use anyhow::Context;
 use clap::Parser;
 use embed_bot::{EmbedBot, Settings};
 use serenity::{prelude::GatewayIntents, Client};
-use std::{fs::File, path::PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    process::exit,
+};
 use tokio::select;
 
 #[cfg(feature = "implicit-auto-embed")]
@@ -19,7 +23,7 @@ fn get_gateway_intents() -> GatewayIntents {
 
 #[derive(Parser)]
 struct Opts {
-    #[clap(long, default_value = "/etc/embedbot.json")]
+    #[clap(long, default_value = "/etc/embedbot.toml")]
     config_path: PathBuf,
 }
 
@@ -29,35 +33,34 @@ async fn main() {
 
     let opts = Opts::parse();
 
-    let settings = {
-        let f = File::open(opts.config_path).expect("access to config file");
-        let s: Settings = serde_json::from_reader(f).unwrap();
-        tracing::info!("Loaded config: {:#?}", s);
-        s
+    let settings = match load_settings(&opts.config_path) {
+        Ok(settings) => {
+            tracing::debug!("Loaded config: {settings:#?}");
+            settings
+        },
+        Err(e) => {
+            tracing::error!("Unable to load config: {e:#}");
+            exit(1);
+        },
     };
 
     let embed_bot = {
-        let mut e = EmbedBot::new();
+        let mut e = EmbedBot::from_settings(settings.embed_behaviours);
 
         if let Some(modules) = settings.modules {
             #[cfg(feature = "reddit")]
             if let Some(settings) = modules.reddit {
-                e.register_api(post_grab_api::reddit::Api::from_settings(settings));
+                e.register_api(scraper::reddit::Api::from_settings(settings));
             }
 
             #[cfg(feature = "ninegag")]
             if let Some(settings) = modules.ninegag {
-                e.register_api(post_grab_api::ninegag::Api::from_settings(settings));
-            }
-
-            #[cfg(feature = "svg")]
-            if let Some(settings) = modules.svg {
-                e.register_api(post_grab_api::svg::Api::from_settings(settings));
+                e.register_api(scraper::ninegag::Api::from_settings(settings));
             }
 
             #[cfg(feature = "twitter")]
             if let Some(settings) = modules.twitter {
-                e.register_api(post_grab_api::twitter::Api::from_settings(settings));
+                e.register_api(scraper::twitter::Api::from_settings(settings));
             }
         }
 
@@ -76,4 +79,14 @@ async fn main() {
         _ = tokio::signal::ctrl_c() => {
         },
     }
+}
+
+fn load_settings(path: &Path) -> anyhow::Result<Settings> {
+    let settings_str =
+        std::fs::read_to_string(path).with_context(|| format!("Unable to open config file at {}", path.display()))?;
+
+    let settings: Settings =
+        toml::from_str(&settings_str).with_context(|| format!("Unable to parse config file at: {}", path.display()))?;
+
+    Ok(settings)
 }

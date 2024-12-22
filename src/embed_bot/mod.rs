@@ -1,13 +1,18 @@
+mod embed;
 mod settings;
 
-use crate::post_grab_api::{CreateResponse, DynPostScraper, EmbedOptions, Error, Post};
+use crate::{
+    embed_bot::{
+        embed::EmbedOptions,
+        settings::{EmbedBehaviour, EmbedBehaviours},
+    },
+    scraper::{Post, PostScraper},
+};
 use itertools::Itertools;
 use serenity::{
+    all::{CommandDataOption, CommandDataOptionValue},
     async_trait,
-    builder::{
-        CreateCommand, CreateCommandOption, CreateEmbed, CreateInteractionResponse, CreateInteractionResponseMessage,
-        CreateMessage,
-    },
+    builder::{CreateCommand, CreateCommandOption, CreateInteractionResponse},
     client::{Context, EventHandler},
     model::{
         application::{Command, CommandData, CommandOptionType, CommandType, Interaction},
@@ -16,38 +21,62 @@ use serenity::{
     },
 };
 pub use settings::Settings;
+use thiserror::Error;
 use url::Url;
 
-#[derive(Default)]
 pub struct EmbedBot {
-    apis: Vec<Box<dyn DynPostScraper + Send + Sync>>,
+    apis: Vec<Box<dyn PostScraper + Send + Sync>>,
+    embed_behaviours: EmbedBehaviours,
+}
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("No scraper available")]
+    NoScraperAvailable,
+
+    #[error("Unable to scrape post: {0:#}")]
+    PostScrapeFailed(#[from] anyhow::Error),
 }
 
 impl EmbedBot {
-    pub fn new() -> Self {
-        EmbedBot { apis: Vec::new() }
+    pub fn from_settings(settings: EmbedBehaviours) -> Self {
+        EmbedBot { apis: Vec::new(), embed_behaviours: settings }
     }
 
-    pub fn find_api(&self, url: &Url) -> Option<&(dyn DynPostScraper + Send + Sync)> {
+    pub fn find_api(&self, url: &Url) -> Option<&(dyn PostScraper + Send + Sync)> {
         self.apis.iter().find(|a| a.is_suitable(url)).map(AsRef::as_ref)
     }
 
-    pub fn register_api<T: 'static + DynPostScraper + Send + Sync>(&mut self, api: T) {
+    pub fn register_api<T: 'static + PostScraper + Send + Sync>(&mut self, api: T) {
         self.apis.push(Box::new(api));
     }
 
-    async fn get_post(&self, mut url: Url) -> Result<Box<dyn Post>, Error> {
+    async fn scrape_post(&self, mut url: Url) -> Result<Post, Error> {
         if let Some(api) = self.find_api(&url) {
             url.set_fragment(None);
-            api.get_dyn_post(url).await
+            let post = api.scrape_post(url).await?;
+            Ok(post)
         } else {
-            Err(Error::NoApiAvailable)
+            Err(Error::NoScraperAvailable)
         }
     }
+}
 
-    fn reply_error(msg: &str, response: CreateResponse) -> CreateResponse {
-        response.embed(CreateEmbed::new().title(":x: Error").description(msg))
-    }
+macro_rules! interaction_try {
+    ($command:expr, $ctx:expr, $res:expr) => {
+        match $res {
+            Ok(opt) => opt,
+            Err(err) => {
+                return $command
+                    .create_response(
+                        $ctx,
+                        CreateInteractionResponse::Message(embed::error(format!("Invalid input: {err}"))),
+                    )
+                    .await
+                    .unwrap();
+            },
+        }
+    };
 }
 
 #[async_trait]
@@ -75,28 +104,24 @@ impl EventHandler for EmbedBot {
             };
 
             if let Some(url) = url {
-                match self.get_post(url.clone()).await {
+                match self.scrape_post(url.clone()).await {
                     Ok(post) => {
                         msg.channel_id
                             .send_message(
                                 &ctx,
-                                post.create_embed(
+                                embed::embed(
+                                    &post,
                                     &msg.author,
-                                    &EmbedOptions { comment, ..Default::default() },
-                                    CreateResponse::Message(CreateMessage::new()),
-                                )
-                                .into_message(),
+                                    &EmbedOptions { comment: comment.as_deref(), ..Default::default() },
+                                ),
                             )
                             .await
                             .unwrap();
 
                         msg.delete(&ctx).await.unwrap();
                     },
-                    Err(Error::NoApiAvailable) => {
-                        tracing::info!("not embedding {}: no api available", url);
-                    },
-                    Err(Error::NotSupposedToEmbed(_)) => {
-                        tracing::info!("ignoring {}: not supposed to embed", url);
+                    Err(Error::NoScraperAvailable) => {
+                        tracing::info!("not embedding {}: no scraper available", url);
                     },
                     Err(e) => {
                         tracing::error!("error while trying to embed {}: {}", url, e);
@@ -118,7 +143,7 @@ impl EventHandler for EmbedBot {
                 .add_option(
                     CreateCommandOption::new(
                         CommandOptionType::Boolean,
-                        "ignore-nsfw",
+                        "embed-nsfw",
                         "embed fully even if post is flagged as nsfw",
                     )
                     .required(false),
@@ -126,7 +151,7 @@ impl EventHandler for EmbedBot {
                 .add_option(
                     CreateCommandOption::new(
                         CommandOptionType::Boolean,
-                        "ignore-spoiler",
+                        "embed-spoiler",
                         "embed fully even if post is flagged as spoiler",
                     )
                     .required(false),
@@ -146,44 +171,41 @@ impl EventHandler for EmbedBot {
         if let Interaction::Command(command) = &interaction {
             match &command.data {
                 CommandData { name, options, .. } if name == "embed" => {
-                    let url = options
-                        .iter()
-                        .find(|c| c.name == "url")
-                        .unwrap()
-                        .value
-                        .as_str()
-                        .unwrap();
+                    let url = interaction_try!(
+                        &command,
+                        &ctx,
+                        match parse_option(options, "url", |x| x.as_str()) {
+                            Ok(Some(value)) => Ok(value),
+                            Ok(None) => Err(anyhow::anyhow!("Parameter embed must be present")),
+                            Err(e) => Err(e),
+                        }
+                    );
 
-                    let comment = options
-                        .iter()
-                        .find(|c| c.name == "comment")
-                        .and_then(|c| c.value.as_str())
-                        .map(|c| c.to_owned());
+                    let comment = interaction_try!(&command, &ctx, parse_option(options, "comment", |x| x.as_str()));
 
-                    let ignore_nsfw = options
-                        .iter()
-                        .find(|c| c.name == "ignore-nsfw")
-                        .and_then(|c| c.value.as_bool())
-                        .unwrap_or(false);
+                    let embed_nsfw = select_embed_behaviour(
+                        &self.embed_behaviours.nsfw,
+                        interaction_try!(&command, &ctx, parse_option(options, "embed-nsfw", |x| x.as_bool())),
+                    );
 
-                    let ignore_spoiler = options
-                        .iter()
-                        .find(|c| c.name == "ignore-spoiler")
-                        .and_then(|c| c.value.as_bool())
-                        .unwrap_or(false);
+                    let embed_spoiler = select_embed_behaviour(
+                        &self.embed_behaviours.spoiler,
+                        interaction_try!(&command, &ctx, parse_option(options, "embed-spoiler", |x| x.as_bool())),
+                    );
 
-                    let opts = EmbedOptions { comment, ignore_nsfw, ignore_spoiler };
+                    let opts = EmbedOptions { comment, embed_nsfw, embed_spoiler };
 
                     match Url::parse(url) {
                         Ok(url) => {
                             let user = &command.user;
 
-                            match self.get_post(url.clone()).await {
+                            match self.scrape_post(url.clone()).await {
                                 Ok(post) => {
                                     command
-                                        .create_response(&ctx, CreateInteractionResponse::Message({
-                                            post.create_embed(user, &opts, CreateResponse::Interaction(CreateInteractionResponseMessage::new())).into_interaction()
-                                        }))
+                                        .create_response(
+                                            &ctx,
+                                            CreateInteractionResponse::Message(embed::embed(&post, user, &opts)),
+                                        )
                                         .await
                                         .unwrap();
 
@@ -194,10 +216,7 @@ impl EventHandler for EmbedBot {
                                     tracing::error!("error: {msg}");
 
                                     command
-                                        .create_response(&ctx, CreateInteractionResponse::Message({
-                                            Self::reply_error(&msg, CreateResponse::Interaction(CreateInteractionResponseMessage::new()))
-                                                .into_interaction()
-                                        }))
+                                        .create_response(&ctx, CreateInteractionResponse::Message(embed::error(msg)))
                                         .await
                                         .unwrap();
                                 },
@@ -208,11 +227,7 @@ impl EventHandler for EmbedBot {
                                 .create_response(
                                     &ctx,
                                     CreateInteractionResponse::Message({
-                                        Self::reply_error(
-                                            &format!("Could not parse url: {}", url),
-                                            CreateResponse::Interaction(CreateInteractionResponseMessage::new()),
-                                        )
-                                        .into_interaction()
+                                        embed::error(format!("Could not parse url: {url}"))
                                     }),
                                 )
                                 .await
@@ -223,5 +238,32 @@ impl EventHandler for EmbedBot {
                 _ => (),
             }
         }
+    }
+}
+
+fn parse_option<'val, F, T, I>(options: I, name: &str, try_map_value: F) -> anyhow::Result<Option<T>>
+where
+    I: IntoIterator<Item = &'val CommandDataOption>,
+    F: FnOnce(&'val CommandDataOptionValue) -> Option<T>,
+    T: 'val,
+{
+    let opt = options.into_iter().find(|c| c.name == name);
+
+    match opt {
+        Some(CommandDataOption { value, .. }) => match try_map_value(value) {
+            Some(value) => Ok(Some(value)),
+            None => Err(anyhow::anyhow!(
+                "Invalid type for parameter {name}, expected {expected}",
+                expected = std::any::type_name::<T>()
+            )),
+        },
+        None => Ok(None),
+    }
+}
+
+fn select_embed_behaviour(behav: &EmbedBehaviour, requested: Option<bool>) -> bool {
+    match requested {
+        Some(request) if behav.allow_override => request,
+        _ => behav.default,
     }
 }
