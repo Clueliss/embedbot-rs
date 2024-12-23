@@ -87,7 +87,7 @@ pub fn embed<R: CreateResponse>(post: &Post, user: &User, opts: &EmbedOptions) -
     let response = R::default();
 
     if post.common.nsfw && !opts.embed_nsfw {
-        response.embed({
+        response.add_embed({
             let mut e = CreateEmbed::new()
                 .title(util::fmt_title(&post.common))
                 .description("Warning NSFW: Click to view content")
@@ -101,7 +101,7 @@ pub fn embed<R: CreateResponse>(post: &Post, user: &User, opts: &EmbedOptions) -
             e
         })
     } else if post.common.spoiler && !opts.embed_spoiler {
-        response.embed({
+        response.add_embed({
             let mut e = CreateEmbed::new()
                 .title(util::fmt_title(&post.common))
                 .description("Spoiler: Click to view content")
@@ -120,17 +120,25 @@ pub fn embed<R: CreateResponse>(post: &Post, user: &User, opts: &EmbedOptions) -
         })
     } else {
         match &post.specialized {
-            PostSpecializedData::TextOnly => response.embed(base_embed(user, opts.comment, &post.common)),
+            PostSpecializedData::TextOnly => response.add_embed(base_embed(user, opts.comment, &post.common)),
             PostSpecializedData::Image { img_url } => {
-                response.embed(base_embed(user, opts.comment, &post.common).image(img_url.as_str()))
+                response.add_embed(base_embed(user, opts.comment, &post.common).image(img_url.as_str()))
             },
             PostSpecializedData::Gallery { img_urls } => {
-                response.content(manual_embed(user, opts.comment, &post.common, img_urls))
+                let base = response.add_embed(base_embed(user, opts.comment, &post.common));
+
+                img_urls.iter().enumerate().fold(base, |response, (ix, img_url)| {
+                    response.add_embed(
+                        CreateEmbed::new()
+                            .image(img_url.as_str())
+                            .footer(CreateEmbedFooter::new(format!("Image {}/{}", ix + 1, img_urls.len()))),
+                    )
+                })
             },
             PostSpecializedData::Video { video_url } => {
                 response.content(manual_embed(user, opts.comment, &post.common, &[video_url.clone()]))
             },
-            PostSpecializedData::VideoThumbnail { thumbnail_url } => response.embed(
+            PostSpecializedData::VideoThumbnail { thumbnail_url } => response.add_embed(
                 base_embed(user, opts.comment, &post.common)
                     .image(thumbnail_url.as_str())
                     .footer(CreateEmbedFooter::new(
@@ -142,5 +150,5 @@ pub fn embed<R: CreateResponse>(post: &Post, user: &User, opts: &EmbedOptions) -
 }
 
 pub fn error<R: CreateResponse, S: Into<String>>(msg: S) -> R {
-    R::default().embed(CreateEmbed::new().title(":x: Error").description(msg))
+    R::default().add_embed(CreateEmbed::new().title(":x: Error").description(msg))
 }

@@ -2,7 +2,7 @@ use serenity::builder::{CreateEmbed, CreateInteractionResponseMessage, CreateMes
 
 pub trait CreateResponse: Default {
     fn content(self, s: impl Into<String>) -> Self;
-    fn embed(self, e: CreateEmbed) -> Self;
+    fn add_embed(self, e: CreateEmbed) -> Self;
 }
 
 macro_rules! impl_create_response {
@@ -12,8 +12,8 @@ macro_rules! impl_create_response {
                 self.content(s)
             }
 
-            fn embed(self, e: CreateEmbed) -> Self {
-                self.embed(e)
+            fn add_embed(self, e: CreateEmbed) -> Self {
+                self.add_embed(e)
             }
         }
     };
