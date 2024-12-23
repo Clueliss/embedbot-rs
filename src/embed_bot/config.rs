@@ -4,15 +4,15 @@ use std::fmt::{Debug, Formatter};
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct Settings {
+pub struct Config {
     pub discord_token: String,
     pub embed_behaviour: EmbedBehaviours,
     pub modules: Option<Modules>,
 }
 
-impl Debug for Settings {
+impl Debug for Config {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Settings")
+        f.debug_struct("Config")
             .field("discord_token", &"[REDACTED]")
             .field("embed_behaviour", &self.embed_behaviour)
             .field("modules", &self.modules)

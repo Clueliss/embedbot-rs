@@ -1,13 +1,14 @@
+mod config;
 mod embed;
-mod settings;
 
 use crate::{
     embed_bot::{
+        config::{EmbedBehaviour, EmbedBehaviours},
         embed::EmbedOptions,
-        settings::{EmbedBehaviour, EmbedBehaviours},
     },
     scraper::{Post, PostScraper},
 };
+pub use config::Config;
 use itertools::Itertools;
 use serenity::{
     async_trait,
@@ -22,7 +23,6 @@ use serenity::{
         gateway::Ready,
     },
 };
-pub use settings::Settings;
 use thiserror::Error;
 use url::Url;
 
@@ -41,8 +41,8 @@ pub enum Error {
 }
 
 impl EmbedBot {
-    pub fn from_settings(settings: EmbedBehaviours) -> Self {
-        EmbedBot { apis: Vec::new(), embed_behaviour: settings }
+    pub fn from_embed_config(config: EmbedBehaviours) -> Self {
+        EmbedBot { apis: Vec::new(), embed_behaviour: config }
     }
 
     pub fn register_api<T: 'static + PostScraper + Send + Sync>(&mut self, api: T) {
@@ -141,10 +141,10 @@ impl EventHandler for EmbedBot {
                         server_communication_try!(msg.delete(&ctx).await, "Unable to delete user message");
                     },
                     Err(Error::NoScraperAvailable) => {
-                        tracing::info!("not embedding {}: no scraper available", url);
+                        tracing::info!("Not embedding {}: no scraper available", url);
                     },
                     Err(e) => {
-                        tracing::error!("error while trying to embed {}: {}", url, e);
+                        tracing::error!("Error while trying to embed {}: {}", url, e);
                     },
                 }
             }
@@ -186,7 +186,7 @@ impl EventHandler for EmbedBot {
             "Unable to set up commands"
         );
 
-        tracing::info!("logged in");
+        tracing::info!("Logged in");
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
