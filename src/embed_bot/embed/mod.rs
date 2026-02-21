@@ -135,9 +135,12 @@ pub fn embed<R: CreateResponse>(post: &Post, user: &User, opts: &EmbedOptions) -
                     )
                 })
             },
-            PostSpecializedData::Video { video_url } => {
-                response.content(manual_embed(user, opts.comment, &post.common, &[video_url.clone()]))
-            },
+            PostSpecializedData::Video { video_url } => response.content(manual_embed(
+                user,
+                opts.comment,
+                &post.common,
+                std::slice::from_ref(video_url),
+            )),
             PostSpecializedData::VideoThumbnail { thumbnail_url } => response.add_embed(
                 base_embed(user, opts.comment, &post.common)
                     .image(thumbnail_url.as_str())
