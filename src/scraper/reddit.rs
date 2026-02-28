@@ -158,6 +158,7 @@ impl PostScraper for Api {
             u.set_query(None);
 
             let mut get_url = u.clone();
+            get_url.set_host(Some("old.reddit.com"))?;
             get_url.set_path(&format!("{}.json", u.path()));
 
             (u, wget_json(get_url).await?)
